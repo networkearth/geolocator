@@ -19,7 +19,7 @@ class NormalDistanceDistribution:
 
         self.ID = f'NormalDistanceDistribution_{sigma}'
 
-    def likelihood(self, center_x, center_y, x, y):
+    def likelihood(self, center_y, center_x, y, x):
         distance = np.sqrt((center_x - x)**2 + (center_y - y)**2)
         return self.distribution.pdf(distance)
     
@@ -91,7 +91,7 @@ def integrate_likelihood(transfer_likelihood, world, source_x, source_y, dest_x,
     - probability (float): the probability of transfer from source to dest cells
     """
 
-    likelihood = partial(transfer_likelihood, source_x, source_y)
+    likelihood = partial(transfer_likelihood, source_y, source_x)
 
     resolution = world.resolution
     x_min = dest_x - resolution / 2
