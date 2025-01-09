@@ -15,8 +15,9 @@ from functools import partial
 class NormalDistanceDistribution:
     def __init__(self, sigma):
         self.sigma = sigma
-        self.ID = f'NormalDistanceDistribution-{sigma}'
         self.distribution = norm(loc=0, scale=sigma)
+
+        self.ID = f'NormalDistanceDistribution_{sigma}'
 
     def likelihood(self, center_x, center_y, x, y):
         distance = np.sqrt((center_x - x)**2 + (center_y - y)**2)
@@ -38,26 +39,26 @@ class MemoryCache:
         self.cache = {}
 
     def save(self, dir):
+        if not os.path.exists(dir):
+            os.mkdir(dir)
         for key, value in self.cache.items():
             np.save(f'{dir}/{key}.npy', value, allow_pickle=False)
 
     def load(self, dir):
         self.cache = {}
         for file in os.listdir(dir):
-            key = file.split('.')[0]
             value = np.load(f'{dir}/{file}')
+            key = '.'.join(file.split('.')[:-1])
             self.cache[key] = value
 
 # Functions
 
-def get_transfer_matrix(transfer_dist, cache, x, y, resolution, processes=1, min_probability=10**-10):
+def get_transfer_matrix(transfer_dist, world, cache, processes=1, min_probability=10**-10):
     """
     Inputs:
     - transfer_dist (obj): a transfer distribution object
+    - world (obj): a world object
     - cache (obj): a caching object
-    - x (np.array): array of x coordinates
-    - y (np.array): array of y coordinates
-    - resolution (float): width of a cell
     - processes (int): number of processes to use
     - min_probability (float): minimum probability to keep
 
@@ -65,22 +66,26 @@ def get_transfer_matrix(transfer_dist, cache, x, y, resolution, processes=1, min
     - transfer_matrix (np.array): a transfer probability matrix
         columns are the starting locations and rows are the ending locations
     """
-    transfer_matrix = cache.get(transfer_dist.ID)
+    assert '+' not in transfer_dist.ID
+    assert '+' not in world.ID
+
+    cache_key = f'{transfer_dist.ID}+{world.ID}'
+    transfer_matrix = cache.get(cache_key)
     if transfer_matrix is None:
-        transfer_matrix = build_transfer_matrix(transfer_dist, x, y, resolution, processes, min_probability)
-        cache.set(transfer_dist.ID, transfer_matrix)
+        transfer_matrix = build_transfer_matrix(transfer_dist, world, processes, min_probability)
+        cache.set(cache_key, transfer_matrix)
     return transfer_matrix
 
 
-def integrate_likelihood(transfer_likelihood, source_x, source_y, resolution, dest_x, dest_y):
+def integrate_likelihood(transfer_likelihood, world, source_x, source_y, dest_x, dest_y):
     """
     Inputs:
     - transfer_likelihood (func): transfer likelihood
+    - world (obj): a world object
     - source_x (float): x coordinate of source location
     - source_y (float): y coordinate of source location
     - dest_x (float): x coordinate of destination location
     - dest_y (float): y coordinate of destination location
-    - resolution (float): width of the cell
 
     Outputs:
     - probability (float): the probability of transfer from source to dest cells
@@ -88,6 +93,7 @@ def integrate_likelihood(transfer_likelihood, source_x, source_y, resolution, de
 
     likelihood = partial(transfer_likelihood, source_x, source_y)
 
+    resolution = world.resolution
     x_min = dest_x - resolution / 2
     x_max = dest_x + resolution / 2
     y_min = dest_y - resolution / 2
@@ -97,13 +103,11 @@ def integrate_likelihood(transfer_likelihood, source_x, source_y, resolution, de
     return probability
 
 
-def build_transfer_matrix(transfer_dist, x, y, resolution, processes=1, min_probability=10**-10):
+def build_transfer_matrix(transfer_dist, world, processes=1, min_probability=10**-10):
     """
     Inputs:
     - transfer_dist (obj): a transfer distribution object
-    - x (np.array): array of x coordinates
-    - y (np.array): array of y coordinates
-    - resolution (float): width of a cell
+    - world (obj): a world object
     - processes (int): number of processes to use
     - min_probability (float): minimum probability to keep
 
@@ -111,11 +115,14 @@ def build_transfer_matrix(transfer_dist, x, y, resolution, processes=1, min_prob
     - transfer_matrix (np.array): a transfer probability matrix
         columns are the starting locations and rows are the ending locations
     """
+    x, y = world.world[:2]
     transfer_matrix = np.zeros((len(x), len(x)))
-    for i, (source_x, source_y) in tqdm(enumerate(zip(x, y))):
+    iterator = list(enumerate(zip(x, y)))
+    for i, (source_x, source_y) in tqdm(iterator):
         integrate = partial(
-            integrate_likelihood, 
-            transfer_dist.likelihood, source_x, source_y, resolution
+            integrate_likelihood,
+            transfer_dist.likelihood, world, 
+            source_x, source_y
         )
         with Pool(processes) as pool:
             column = np.array(pool.starmap(integrate, zip(x, y)))
